@@ -17,6 +17,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ThreadFactory;
 
 import org.apache.qpid.proton.amqp.transport.ErrorCondition;
 import org.apache.qpid.proton.engine.BaseHandler;
@@ -33,6 +34,7 @@ import org.slf4j.Marker;
 import org.slf4j.MarkerFactory;
 
 import com.microsoft.azure.servicebus.ClientSettings;
+import com.microsoft.azure.servicebus.NamedThreadFactory;
 import com.microsoft.azure.servicebus.amqp.BaseLinkHandler;
 import com.microsoft.azure.servicebus.amqp.ConnectionHandler;
 import com.microsoft.azure.servicebus.amqp.DispatchHandler;
@@ -49,9 +51,10 @@ import com.microsoft.azure.servicebus.security.SecurityToken;
  */
 public class MessagingFactory extends ClientEntity implements IAmqpConnection
 {
-    private static final Logger TRACE_LOGGER = LoggerFactory.getLogger(MessagingFactory.class);
-    public static final ExecutorService INTERNAL_THREAD_POOL = Executors.newCachedThreadPool();
-	
+	private static final Logger TRACE_LOGGER = LoggerFactory.getLogger(MessagingFactory.class);
+	private static final ThreadFactory INTERNAL_THREAD_FACTORY = new NamedThreadFactory("asb-messaging");
+	public static final ExecutorService INTERNAL_THREAD_POOL = Executors.newCachedThreadPool(INTERNAL_THREAD_FACTORY);
+
     private static final String REACTOR_THREAD_NAME_PREFIX = "ReactorThread";
 	private static final int MAX_CBS_LINK_CREATION_ATTEMPTS = 3;
 	private final String hostName;
@@ -61,7 +64,7 @@ public class MessagingFactory extends ClientEntity implements IAmqpConnection
 	private final LinkedList<Link> registeredLinks;
 	private final Object reactorLock;
 	private final RequestResponseLinkcache managementLinksCache;
-	
+
 	private Reactor reactor;
 	private ReactorDispatcher reactorScheduler;
 	private Connection connection;
@@ -71,14 +74,14 @@ public class MessagingFactory extends ClientEntity implements IAmqpConnection
 	private RequestResponseLink cbsLink;
 	private int cbsLinkCreationAttempts = 0;
 	private Throwable lastCBSLinkCreationException = null;
-	
+
 	private final ClientSettings clientSettings;
-	
+
 	private MessagingFactory(URI namespaceEndpointUri, ClientSettings clientSettings)
 	{
 	    super("MessagingFactory".concat(StringUtil.getShortRandomString()));
 	    this.clientSettings = clientSettings;
-	    
+
 	    this.hostName = namespaceEndpointUri.getHost();
 	    this.registeredLinks = new LinkedList<Link>();
         this.connetionCloseFuture = new CompletableFuture<Void>();
@@ -107,7 +110,7 @@ public class MessagingFactory extends ClientEntity implements IAmqpConnection
 	{
 		return this.hostName;
 	}
-	
+
 	private Reactor getReactor()
 	{
 		synchronized (this.reactorLock)
@@ -115,7 +118,7 @@ public class MessagingFactory extends ClientEntity implements IAmqpConnection
 			return this.reactor;
 		}
 	}
-	
+
 	private ReactorDispatcher getReactorScheduler()
 	{
 		synchronized (this.reactorLock)
@@ -133,13 +136,13 @@ public class MessagingFactory extends ClientEntity implements IAmqpConnection
 			this.reactor = newReactor;
 			this.reactorScheduler = new ReactorDispatcher(newReactor);
 		}
-		
+
 		String reactorThreadName = REACTOR_THREAD_NAME_PREFIX + UUID.randomUUID().toString();
 		Thread reactorThread = new Thread(new RunReactor(), reactorThreadName);
 		reactorThread.start();
 		TRACE_LOGGER.info("Started reactor");
 	}
-	
+
 	Connection getActiveConnectionOrNothing()
 	{
 		if (this.connection == null || this.connection.getLocalState() == EndpointState.CLOSED || this.connection.getRemoteState() == EndpointState.CLOSED) {
@@ -149,7 +152,7 @@ public class MessagingFactory extends ClientEntity implements IAmqpConnection
 			return this.connection;
 		}
 	}
-	
+
 	Connection getActiveConnectionCreateIfNecessary()
 	{
 		if (this.connection == null || this.connection.getLocalState() == EndpointState.CLOSED || this.connection.getRemoteState() == EndpointState.CLOSED)
@@ -178,24 +181,24 @@ public class MessagingFactory extends ClientEntity implements IAmqpConnection
 	{
 		return this.clientSettings.getRetryPolicy();
 	}
-	
+
 	public ClientSettings getClientSetttings()
 	{
 	    return this.clientSettings;
 	}
-	
+
 	public static CompletableFuture<MessagingFactory> createFromNamespaceNameAsyc(String sbNamespaceName, ClientSettings clientSettings)
 	{
 	    return createFromNamespaceEndpointURIAsyc(Util.convertNamespaceToEndPointURI(sbNamespaceName), clientSettings);
 	}
-	
+
 	public static CompletableFuture<MessagingFactory> createFromNamespaceEndpointURIAsyc(URI namespaceEndpointURI, ClientSettings clientSettings)
     {
 	    if(TRACE_LOGGER.isInfoEnabled())
         {
             TRACE_LOGGER.info("Creating messaging factory from namespace endpoint uri '{}'", namespaceEndpointURI.toString());
         }
-        
+
         MessagingFactory messagingFactory = new MessagingFactory(namespaceEndpointURI, clientSettings);
         try {
             messagingFactory.startReactor(messagingFactory.reactorHandler);
@@ -206,33 +209,33 @@ public class MessagingFactory extends ClientEntity implements IAmqpConnection
         }
         return messagingFactory.factoryOpenFuture;
     }
-	
+
 	public static MessagingFactory createFromNamespaceName(String sbNamespaceName, ClientSettings clientSettings) throws InterruptedException, ServiceBusException
     {
 	    return completeFuture(createFromNamespaceNameAsyc(sbNamespaceName, clientSettings));
     }
-    
+
     public static MessagingFactory createFromNamespaceEndpointURI(URI namespaceEndpointURI, ClientSettings clientSettings) throws InterruptedException, ServiceBusException
     {
         return completeFuture(createFromNamespaceEndpointURIAsyc(namespaceEndpointURI, clientSettings));
     }
 
-	/**	 
+	/**
 	 * Creates an instance of MessagingFactory from the given connection string builder. This is a non-blocking method.
 	 * @param builder connection string builder to the  bus namespace or entity
 	 * @return a <code>CompletableFuture</code> which completes when a connection is established to the namespace or when a connection couldn't be established.
 	 * @see java.util.concurrent.CompletableFuture
-	 */    
+	 */
 	public static CompletableFuture<MessagingFactory> createFromConnectionStringBuilderAsync(final ConnectionStringBuilder builder)
-	{	
+	{
 	    if(TRACE_LOGGER.isInfoEnabled())
 	    {
 	        TRACE_LOGGER.info("Creating messaging factory from connection string '{}'", builder.toLoggableString());
 	    }
-	    
+
 	    return createFromNamespaceEndpointURIAsyc(builder.getEndpoint(), Util.getClientSettingsFromConnectionStringBuilder(builder));
 	}
-	
+
 	/**
 	 * Creates an instance of MessagingFactory from the given connection string. This is a non-blocking method.
 	 * @param connectionString connection string to the  bus namespace or entity
@@ -244,7 +247,7 @@ public class MessagingFactory extends ClientEntity implements IAmqpConnection
 		ConnectionStringBuilder builder = new ConnectionStringBuilder(connectionString);
 		return createFromConnectionStringBuilderAsync(builder);
 	}
-	
+
 	/**
 	 * Creates an instance of MessagingFactory from the given connection string builder. This method blocks for a connection to the namespace to be established.
 	 * @param builder connection string builder to the  bus namespace or entity
@@ -253,10 +256,10 @@ public class MessagingFactory extends ClientEntity implements IAmqpConnection
 	 * @throws ExecutionException if a connection couldn't be established to the namespace. Cause of the failure can be found by calling {@link Exception#getCause()}
 	 */
 	public static MessagingFactory createFromConnectionStringBuilder(final ConnectionStringBuilder builder) throws InterruptedException, ExecutionException
-	{		
+	{
 		return createFromConnectionStringBuilderAsync(builder).get();
 	}
-	
+
 	/**
 	 * Creates an instance of MessagingFactory from the given connection string. This method blocks for a connection to the namespace to be established.
 	 * @param connectionString connection string to the  bus namespace or entity
@@ -265,7 +268,7 @@ public class MessagingFactory extends ClientEntity implements IAmqpConnection
 	 * @throws ExecutionException if a connection couldn't be established to the namespace. Cause of the failure can be found by calling {@link Exception#getCause()}
 	 */
 	public static MessagingFactory createFromConnectionString(final String connectionString) throws InterruptedException, ExecutionException
-	{		
+	{
 		return createFromConnectionStringAsync(connectionString).get();
 	}
 
@@ -280,7 +283,7 @@ public class MessagingFactory extends ClientEntity implements IAmqpConnection
 	        TRACE_LOGGER.info("MessagingFactory opened.");
 	        AsyncUtil.completeFuture(this.factoryOpenFuture, this);
 	    }
-	    
+
 	    // Connection opened. Initiate new cbs link creation
 	    TRACE_LOGGER.info("Connection opened to host.");
 	    if(this.cbsLink == null)
@@ -299,9 +302,9 @@ public class MessagingFactory extends ClientEntity implements IAmqpConnection
 	    {
 	        TRACE_LOGGER.error("Connection error. '{}'", error);
 	    }
-	    
+
 		if (!this.factoryOpenFuture.isDone())
-		{		    
+		{
 		    AsyncUtil.completeFutureExceptionally(this.factoryOpenFuture, ExceptionUtil.toException(error));
 		    this.setClosed();
 		}
@@ -315,7 +318,7 @@ public class MessagingFactory extends ClientEntity implements IAmqpConnection
 		    TRACE_LOGGER.info("Connection to host closed.");
 		    AsyncUtil.completeFuture(this.connetionCloseFuture, null);
 			Timer.unregister(this.getClientId());
-		} 
+		}
 	}
 
 	private void onReactorError(Exception cause)
@@ -332,9 +335,9 @@ public class MessagingFactory extends ClientEntity implements IAmqpConnection
             {
                 return;
             }
-		    
+
 		    TRACE_LOGGER.warn("Reactor error occured", cause);
-			
+
 			try
 			{
 				this.startReactor(this.reactorHandler);
@@ -345,11 +348,11 @@ public class MessagingFactory extends ClientEntity implements IAmqpConnection
 			    TRACE_LOGGER.error(fatalMarker, "Re-starting reactor failed with exception.", e);
 				this.onReactorError(cause);
 			}
-			
+
 			this.closeConnection(null, cause);
 		}
 	}
-	
+
 	// One of the parameters must be null
 	private void closeConnection(ErrorCondition error, Exception cause)
 	{
@@ -359,13 +362,13 @@ public class MessagingFactory extends ClientEntity implements IAmqpConnection
 	    {
 	        Link[] links = this.registeredLinks.toArray(new Link[0]);
 	        this.registeredLinks.clear();
-	        
+
 	        TRACE_LOGGER.debug("Closing all links on the connection. Number of links '{}'", links.length);
 	        for(Link link : links)
 	        {
 	            link.close();
 	        }
-	        
+
 	        TRACE_LOGGER.debug("Closed all links on the connection. Number of links '{}'", links.length);
 
 	        if (currentConnection.getLocalState() != EndpointState.CLOSED)
@@ -373,7 +376,7 @@ public class MessagingFactory extends ClientEntity implements IAmqpConnection
 	            TRACE_LOGGER.info("Closing connection to host");
 	            currentConnection.close();
 	        }
-	        
+
 	        for(Link link : links)
 	        {
 	            Handler handler = BaseHandler.getHandler(link);
@@ -409,13 +412,13 @@ public class MessagingFactory extends ClientEntity implements IAmqpConnection
 		        TRACE_LOGGER.info("Closing CBS link");
 		        cbsLinkCloseFuture = this.cbsLink.closeAsync();
 		    }
-		    
+
 		    cbsLinkCloseFuture.thenRun(() -> this.managementLinksCache.freeAsync()).thenRun(() -> {
 		        if(this.cbsLinkCreationFuture != null && !this.cbsLinkCreationFuture.isDone())
 	            {
 	                this.cbsLinkCreationFuture.completeExceptionally(new Exception("Connection closed."));
 	            }
-		        
+
 		        if (this.connection != null && this.connection.getRemoteState() != EndpointState.CLOSED)
 	            {
 	                try {
@@ -434,7 +437,7 @@ public class MessagingFactory extends ClientEntity implements IAmqpConnection
 	                } catch (IOException e) {
 	                    this.connetionCloseFuture.completeExceptionally(e);
 	                }
-	                
+
 	                Timer.schedule(new Runnable()
 	                {
 	                    @Override
@@ -456,7 +459,7 @@ public class MessagingFactory extends ClientEntity implements IAmqpConnection
 	                Timer.unregister(this.getClientId());
 	            }
 		    });
-			
+
 			return this.connetionCloseFuture;
 		}
 		else
@@ -491,7 +494,7 @@ public class MessagingFactory extends ClientEntity implements IAmqpConnection
                         break;
                     }
                     continuteProcessing = this.rctr.process();
-                }				
+                }
 				TRACE_LOGGER.info("Stopping reactor");
 				this.rctr.stop();
 			}
@@ -502,26 +505,26 @@ public class MessagingFactory extends ClientEntity implements IAmqpConnection
 				{
 					cause = handlerException;
 				}
-				
+
 				TRACE_LOGGER.warn("UnHandled exception while processing events in reactor:", handlerException);
 
-				String message = !StringUtil.isNullOrEmpty(cause.getMessage()) ? 
+				String message = !StringUtil.isNullOrEmpty(cause.getMessage()) ?
 						cause.getMessage():
-						!StringUtil.isNullOrEmpty(handlerException.getMessage()) ? 
+						!StringUtil.isNullOrEmpty(handlerException.getMessage()) ?
 							handlerException.getMessage() :
 							"Reactor encountered unrecoverable error";
 				ServiceBusException sbException = new ServiceBusException(
 						true,
 						String.format(Locale.US, "%s, %s", message, ExceptionUtil.getTrackingIDAndTimeToLog()),
 						cause);
-				
+
 				if (cause instanceof UnresolvedAddressException)
 				{
 					sbException = new CommunicationException(
 							String.format(Locale.US, "%s. This is usually caused by incorrect hostname or network configuration. Please check to see if namespace information is correct. %s", message, ExceptionUtil.getTrackingIDAndTimeToLog()),
 							cause);
 				}
-				
+
 				MessagingFactory.this.onReactorError(sbException);
 			}
 			finally
@@ -554,7 +557,7 @@ public class MessagingFactory extends ClientEntity implements IAmqpConnection
 	        this.registeredLinks.remove(link);
 	    }
 	}
-	
+
 	void scheduleOnReactorThread(final DispatchHandler handler) throws IOException
 	{
 		this.getReactorScheduler().invoke(handler);
@@ -564,7 +567,7 @@ public class MessagingFactory extends ClientEntity implements IAmqpConnection
 	{
 		this.getReactorScheduler().invoke(delay, handler);
 	}
-	
+
 	CompletableFuture<ScheduledFuture<?>> sendSecurityTokenAndSetRenewTimer(String sasTokenAudienceURI, boolean retryOnFailure, Runnable validityRenewer)
     {
 		CompletableFuture<ScheduledFuture<?>> result = new CompletableFuture<ScheduledFuture<?>>();
@@ -619,10 +622,10 @@ public class MessagingFactory extends ClientEntity implements IAmqpConnection
             }
             return null;
         }, MessagingFactory.INTERNAL_THREAD_POOL);
-	    
+
 	    return result;
     }
-	
+
 	private CompletableFuture<Instant> generateAndSendSecurityToken(String sasTokenAudienceURI)
 	{
 		CompletableFuture<SecurityToken> tokenFuture = this.clientSettings.getTokenProvider().getSecurityTokenAsync(sasTokenAudienceURI);
@@ -634,7 +637,7 @@ public class MessagingFactory extends ClientEntity implements IAmqpConnection
 	            }, MessagingFactory.INTERNAL_THREAD_POOL);
 	    }, MessagingFactory.INTERNAL_THREAD_POOL);
 	}
-	
+
 	private static ScheduledFuture<?> scheduleRenewTimer(Instant currentTokenValidUntil, Runnable validityRenewer)
 	{
 		if(currentTokenValidUntil == Instant.MAX)
@@ -649,28 +652,28 @@ public class MessagingFactory extends ClientEntity implements IAmqpConnection
 	        return Timer.schedule(validityRenewer, Duration.ofSeconds(renewInterval), TimerType.OneTimeRun);
 		}
 	}
-	
+
 	CompletableFuture<RequestResponseLink> obtainRequestResponseLinkAsync(String entityPath, MessagingEntityType entityType)
 	{
 	    this.throwIfClosed(null);
 	    return this.managementLinksCache.obtainRequestResponseLinkAsync(entityPath, entityType);
 	}
-	
+
 	void releaseRequestResponseLink(String entityPath)
 	{
 	    if(!this.getIsClosed())
 	    {
 	        this.managementLinksCache.releaseRequestResponseLink(entityPath);
-	    }	    
+	    }
 	}
-	
+
 	private void createCBSLinkAsync()
     {
 		if(this.getIsClosingOrClosed())
 		{
 			return;
 		}
-		
+
 	    if(++this.cbsLinkCreationAttempts > MAX_CBS_LINK_CREATION_ATTEMPTS )
 	    {
 	        Throwable completionEx = this.lastCBSLinkCreationException == null ? new Exception("CBS link creation failed multiple times.") : this.lastCBSLinkCreationException;
@@ -692,9 +695,9 @@ public class MessagingFactory extends ClientEntity implements IAmqpConnection
                     }
                     else
                     {
-                    	this.cbsLink = cbsLink;	
+                    	this.cbsLink = cbsLink;
                         this.cbsLinkCreationFuture.complete(null);
-                    }                    
+                    }
                 }
                 else
                 {
@@ -704,10 +707,10 @@ public class MessagingFactory extends ClientEntity implements IAmqpConnection
                 }
                 return null;
             }, MessagingFactory.INTERNAL_THREAD_POOL);
-	                        
-	    }	    
+
+	    }
     }
-	
+
 	private static <T> T completeFuture(CompletableFuture<T> future) throws InterruptedException, ServiceBusException {
         try {
             return future.get();

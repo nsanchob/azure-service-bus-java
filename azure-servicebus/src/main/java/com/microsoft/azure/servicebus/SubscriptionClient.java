@@ -40,11 +40,11 @@ public final class SubscriptionClient extends InitializableEntity implements ISu
 
 	private SubscriptionClient(ReceiveMode receiveMode, String subscriptionPath)
 	{
-		super(StringUtil.getShortRandomString());		
+		super(StringUtil.getShortRandomString());
 		this.receiveMode = receiveMode;
 		this.subscriptionPath = subscriptionPath;
 	}
-	
+
 	public SubscriptionClient(ConnectionStringBuilder amqpConnectionStringBuilder, ReceiveMode receiveMode) throws InterruptedException, ServiceBusException
 	{
 		this(receiveMode, amqpConnectionStringBuilder.getEntityPath());
@@ -55,12 +55,12 @@ public final class SubscriptionClient extends InitializableEntity implements ISu
             TRACE_LOGGER.info("Created subscription client to connection string '{}'", amqpConnectionStringBuilder.toLoggableString());
         }
 	}
-	
+
 	public SubscriptionClient(String namespace, String subscriptionPath, ClientSettings clientSettings, ReceiveMode receiveMode) throws InterruptedException, ServiceBusException
     {
         this(Util.convertNamespaceToEndPointURI(namespace), subscriptionPath, clientSettings, receiveMode);
     }
-    
+
     public SubscriptionClient(URI namespaceEndpointURI, String subscriptionPath, ClientSettings clientSettings, ReceiveMode receiveMode) throws InterruptedException, ServiceBusException
     {
         this(receiveMode, subscriptionPath);
@@ -70,36 +70,36 @@ public final class SubscriptionClient extends InitializableEntity implements ISu
             TRACE_LOGGER.info("Created subscription client to subscription '{}/{}'", namespaceEndpointURI.toString(), subscriptionPath);
         }
     }
-	
+
 	SubscriptionClient(MessagingFactory factory, String subscriptionPath, ReceiveMode receiveMode) throws InterruptedException, ServiceBusException
 	{
 		this(receiveMode, subscriptionPath);
 		Utils.completeFuture(this.createPumpAndBrowserAsync(factory));
 		TRACE_LOGGER.info("Created subscription client to subscripton '{}'", subscriptionPath);
 	}
-	
+
 	private CompletableFuture<Void> createPumpAndBrowserAsync(MessagingFactory factory)
 	{
 	    this.factory = factory;
 		CompletableFuture<Void> postSessionBrowserFuture = MiscRequestResponseOperationHandler.create(factory, this.subscriptionPath, MessagingEntityType.SUBSCRIPTION).thenAcceptAsync((msoh) -> {
 			this.miscRequestResponseHandler = msoh;
 			this.sessionBrowser = new SessionBrowser(factory, this.subscriptionPath, MessagingEntityType.SUBSCRIPTION, msoh);
-		}, MessagingFactory.INTERNAL_THREAD_POOL);		
-		
+		}, MessagingFactory.INTERNAL_THREAD_POOL);
+
 		this.messageAndSessionPump = new MessageAndSessionPump(factory, this.subscriptionPath, MessagingEntityType.SUBSCRIPTION, receiveMode);
 		CompletableFuture<Void> messagePumpInitFuture = this.messageAndSessionPump.initializeAsync();
-		
+
 		return CompletableFuture.allOf(postSessionBrowserFuture, messagePumpInitFuture);
 	}
-	
+
 	@Override
 	public ReceiveMode getReceiveMode() {
 		return this.receiveMode;
 	}
-	
+
 	@Override
 	public String getEntityPath() {
-		return this.subscriptionPath;				
+		return this.subscriptionPath;
 	}
 
 	@Override
@@ -121,7 +121,7 @@ public final class SubscriptionClient extends InitializableEntity implements ISu
 	public CompletableFuture<Void> addRuleAsync(String ruleName, Filter filter) {
 		return this.addRuleAsync(new RuleDescription(ruleName, filter));
 	}
-	
+
 	@Override
 	public void removeRule(String ruleName) throws InterruptedException, ServiceBusException {
 		Utils.completeFuture(this.removeRuleAsync(ruleName));
@@ -149,27 +149,39 @@ public final class SubscriptionClient extends InitializableEntity implements ISu
 	@Deprecated
 	@Override
 	public void registerMessageHandler(IMessageHandler handler) throws InterruptedException, ServiceBusException {
-		this.messageAndSessionPump.registerMessageHandler(handler);		
+		this.messageAndSessionPump.registerMessageHandler(handler);
 	}
 
 	@Deprecated
 	@Override
 	public void registerMessageHandler(IMessageHandler handler, MessageHandlerOptions handlerOptions) throws InterruptedException, ServiceBusException {
-		this.messageAndSessionPump.registerMessageHandler(handler, handlerOptions);		
+		this.messageAndSessionPump.registerMessageHandler(handler, handlerOptions);
 	}
 
 	@Deprecated
 	@Override
 	public void registerSessionHandler(ISessionHandler handler) throws InterruptedException, ServiceBusException {
-		this.messageAndSessionPump.registerSessionHandler(handler);		
+		this.messageAndSessionPump.registerSessionHandler(handler);
+	}
+
+	@Deprecated
+	@Override
+	public void registerSessionHandler(ISessionHandler handler, String sessionId) throws InterruptedException, ServiceBusException {
+		this.messageAndSessionPump.registerSessionHandler(handler, sessionId);
 	}
 
 	@Deprecated
 	@Override
 	public void registerSessionHandler(ISessionHandler handler, SessionHandlerOptions handlerOptions) throws InterruptedException, ServiceBusException {
-		this.messageAndSessionPump.registerSessionHandler(handler, handlerOptions);		
+		this.messageAndSessionPump.registerSessionHandler(handler, handlerOptions);
 	}
-	
+
+	@Deprecated
+	@Override
+	public void registerSessionHandler(ISessionHandler handler, SessionHandlerOptions handlerOptions, String sessionId) throws InterruptedException, ServiceBusException {
+		this.messageAndSessionPump.registerSessionHandler(handler, handlerOptions, sessionId);
+	}
+
 	@Override
     public void registerMessageHandler(IMessageHandler handler, ExecutorService executorService) throws InterruptedException, ServiceBusException {
         this.messageAndSessionPump.registerMessageHandler(handler, executorService);
@@ -186,8 +198,18 @@ public final class SubscriptionClient extends InitializableEntity implements ISu
     }
 
     @Override
+    public void registerSessionHandler(ISessionHandler handler, String sessionId, ExecutorService executorService) throws InterruptedException, ServiceBusException {
+        this.messageAndSessionPump.registerSessionHandler(handler, sessionId, executorService);
+    }
+
+    @Override
     public void registerSessionHandler(ISessionHandler handler, SessionHandlerOptions handlerOptions, ExecutorService executorService) throws InterruptedException, ServiceBusException {
         this.messageAndSessionPump.registerSessionHandler(handler, handlerOptions, executorService);
+    }
+
+    @Override
+    public void registerSessionHandler(ISessionHandler handler, SessionHandlerOptions handlerOptions, String sessionId, ExecutorService executorService) throws InterruptedException, ServiceBusException {
+        this.messageAndSessionPump.registerSessionHandler(handler, handlerOptions, sessionId, executorService);
     }
 
 	// No op now
@@ -200,7 +222,7 @@ public final class SubscriptionClient extends InitializableEntity implements ISu
 	protected CompletableFuture<Void> onClose() {
 		return this.messageAndSessionPump.closeAsync().thenCompose((v) -> this.miscRequestResponseHandler.closeAsync().thenCompose((w) -> this.factory.closeAsync()));
 	}
-	
+
 //	@Override
 	Collection<IMessageSession> getMessageSessions() throws InterruptedException, ServiceBusException {
 		return Utils.completeFuture(this.getMessageSessionsAsync());
@@ -220,7 +242,7 @@ public final class SubscriptionClient extends InitializableEntity implements ISu
 	CompletableFuture<Collection<IMessageSession>> getMessageSessionsAsync(Instant lastUpdatedTime) {
 		return this.sessionBrowser.getMessageSessionsAsync(Date.from(lastUpdatedTime));
 	}
-	
+
 	@Override
 	public void abandon(UUID lockToken) throws InterruptedException, ServiceBusException {
 		this.messageAndSessionPump.abandon(lockToken);
@@ -228,7 +250,7 @@ public final class SubscriptionClient extends InitializableEntity implements ISu
 
 	@Override
 	public void abandon(UUID lockToken, Map<String, Object> propertiesToModify)	throws InterruptedException, ServiceBusException {
-		this.messageAndSessionPump.abandon(lockToken, propertiesToModify);		
+		this.messageAndSessionPump.abandon(lockToken, propertiesToModify);
 	}
 
 	@Override
@@ -243,7 +265,7 @@ public final class SubscriptionClient extends InitializableEntity implements ISu
 
 	@Override
 	public void complete(UUID lockToken) throws InterruptedException, ServiceBusException {
-		this.messageAndSessionPump.complete(lockToken);		
+		this.messageAndSessionPump.complete(lockToken);
 	}
 
 	@Override
@@ -253,12 +275,12 @@ public final class SubscriptionClient extends InitializableEntity implements ISu
 
 //	@Override
 	void defer(UUID lockToken) throws InterruptedException, ServiceBusException {
-		this.messageAndSessionPump.defer(lockToken);		
+		this.messageAndSessionPump.defer(lockToken);
 	}
 
 //	@Override
 	void defer(UUID lockToken, Map<String, Object> propertiesToModify) throws InterruptedException, ServiceBusException {
-		this.messageAndSessionPump.defer(lockToken, propertiesToModify);		
+		this.messageAndSessionPump.defer(lockToken, propertiesToModify);
 	}
 
 //	@Override
@@ -273,22 +295,22 @@ public final class SubscriptionClient extends InitializableEntity implements ISu
 
 	@Override
 	public void deadLetter(UUID lockToken) throws InterruptedException, ServiceBusException {
-		this.messageAndSessionPump.deadLetter(lockToken);		
+		this.messageAndSessionPump.deadLetter(lockToken);
 	}
 
 	@Override
 	public void deadLetter(UUID lockToken, Map<String, Object> propertiesToModify) throws InterruptedException, ServiceBusException {
-		this.messageAndSessionPump.deadLetter(lockToken, propertiesToModify);		
+		this.messageAndSessionPump.deadLetter(lockToken, propertiesToModify);
 	}
 
 	@Override
 	public void deadLetter(UUID lockToken, String deadLetterReason, String deadLetterErrorDescription) throws InterruptedException, ServiceBusException {
-		this.messageAndSessionPump.deadLetter(lockToken, deadLetterReason, deadLetterErrorDescription);		
+		this.messageAndSessionPump.deadLetter(lockToken, deadLetterReason, deadLetterErrorDescription);
 	}
 
 	@Override
 	public void deadLetter(UUID lockToken, String deadLetterReason, String deadLetterErrorDescription, Map<String, Object> propertiesToModify) throws InterruptedException, ServiceBusException {
-		this.messageAndSessionPump.deadLetter(lockToken, deadLetterReason, deadLetterErrorDescription, propertiesToModify);		
+		this.messageAndSessionPump.deadLetter(lockToken, deadLetterReason, deadLetterErrorDescription, propertiesToModify);
 	}
 
 	@Override
@@ -310,7 +332,7 @@ public final class SubscriptionClient extends InitializableEntity implements ISu
 	public CompletableFuture<Void> deadLetterAsync(UUID lockToken, String deadLetterReason,	String deadLetterErrorDescription, Map<String, Object> propertiesToModify) {
 		return this.messageAndSessionPump.deadLetterAsync(lockToken, deadLetterReason, deadLetterErrorDescription, propertiesToModify);
 	}
-	
+
 	@Override
     public int getPrefetchCount() {
         return this.messageAndSessionPump.getPrefetchCount();
