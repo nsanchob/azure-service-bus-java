@@ -9,7 +9,10 @@ import java.util.HashSet;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
+
+import com.microsoft.azure.servicebus.NamedThreadFactory;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,18 +23,19 @@ import org.slf4j.LoggerFactory;
  */
 final public class Timer
 {
+	private static final ThreadFactory TIMER_THREAD_FACTORY = new NamedThreadFactory("asb-timer");
 	private static ScheduledExecutorService executor = null;
 
 	private static final Logger TRACE_LOGGER = LoggerFactory.getLogger(Timer.class);
 	private static final HashSet<String> references = new HashSet<String>();
 	private static final Object syncReferences = new Object();
 
-	private Timer() 
+	private Timer()
 	{
 	}
 
-	
-	// runFrequency implemented only for TimeUnit granularity - Seconds	 
+
+	// runFrequency implemented only for TimeUnit granularity - Seconds
 	public static ScheduledFuture<?> schedule(Runnable runnable, Duration runFrequency, TimerType timerType)
 	{
 		switch (timerType)
@@ -55,8 +59,8 @@ final public class Timer
 			{
 				final int corePoolSize = Math.max(Runtime.getRuntime().availableProcessors(), 4);
 				TRACE_LOGGER.debug("Starting ScheduledThreadPoolExecutor with coreThreadPoolSize:{}", corePoolSize);
-				
-				executor = Executors.newScheduledThreadPool(corePoolSize);
+
+				executor = Executors.newScheduledThreadPool(corePoolSize, TIMER_THREAD_FACTORY);
 			}
 
 			references.add(clientId);
@@ -68,7 +72,7 @@ final public class Timer
 		synchronized (syncReferences)
 		{
 			if (references.remove(clientId) && references.size() == 0 && executor != null)
-			{				
+			{
 				TRACE_LOGGER.debug("Shuting down ScheduledThreadPoolExecutor");
 				executor.shutdownNow();
 			}

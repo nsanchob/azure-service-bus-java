@@ -65,8 +65,8 @@ class MessageAndSessionPump extends InitializableEntity implements IMessageAndSe
     @Override
     public void registerMessageHandler(IMessageHandler handler) throws InterruptedException, ServiceBusException {
         this.registerMessageHandler(handler, new MessageHandlerOptions());
-    }    
-    
+    }
+
     @Override
     public void registerMessageHandler(IMessageHandler handler, ExecutorService executorService) throws InterruptedException, ServiceBusException {
         this.registerMessageHandler(handler, new MessageHandlerOptions(), executorService);
@@ -77,7 +77,7 @@ class MessageAndSessionPump extends InitializableEntity implements IMessageAndSe
     public void registerMessageHandler(IMessageHandler handler, MessageHandlerOptions handlerOptions) throws InterruptedException, ServiceBusException {
     	this.registerMessageHandler(handler, handlerOptions, ForkJoinPool.commonPool());
     }
-    
+
     @Override
     public void registerMessageHandler(IMessageHandler handler, MessageHandlerOptions handlerOptions, ExecutorService executorService) throws InterruptedException, ServiceBusException {
     	assertNonNulls(handler, handlerOptions, executorService);
@@ -102,11 +102,22 @@ class MessageAndSessionPump extends InitializableEntity implements IMessageAndSe
     @Override
     public void registerSessionHandler(ISessionHandler handler) throws InterruptedException, ServiceBusException {
         this.registerSessionHandler(handler, new SessionHandlerOptions());
-    }    
-    
+    }
+
+    @Deprecated
+    @Override
+    public void registerSessionHandler(ISessionHandler handler, String sessionId) throws InterruptedException, ServiceBusException {
+        this.registerSessionHandler(handler, new SessionHandlerOptions(), sessionId);
+    }
+
     @Override
     public void registerSessionHandler(ISessionHandler handler, ExecutorService executorService) throws InterruptedException, ServiceBusException {
         this.registerSessionHandler(handler, new SessionHandlerOptions(), executorService);
+    }
+
+    @Override
+    public void registerSessionHandler(ISessionHandler handler, String sessionId, ExecutorService executorService) throws InterruptedException, ServiceBusException {
+        this.registerSessionHandler(handler, new SessionHandlerOptions(), sessionId, executorService);
     }
 
     @Deprecated
@@ -114,21 +125,32 @@ class MessageAndSessionPump extends InitializableEntity implements IMessageAndSe
     public void registerSessionHandler(ISessionHandler handler, SessionHandlerOptions handlerOptions) throws InterruptedException, ServiceBusException {
     	this.registerSessionHandler(handler, handlerOptions, ForkJoinPool.commonPool());
     }
-    
+
+    @Deprecated
+    @Override
+    public void registerSessionHandler(ISessionHandler handler, SessionHandlerOptions handlerOptions, String sessionId) throws InterruptedException, ServiceBusException {
+    	this.registerSessionHandler(handler, handlerOptions, sessionId, ForkJoinPool.commonPool());
+    }
+
     @Override
     public void registerSessionHandler(ISessionHandler handler, SessionHandlerOptions handlerOptions, ExecutorService executorService) throws InterruptedException, ServiceBusException {
+    	this.registerSessionHandler(handler, handlerOptions, null, executorService);
+    }
+
+    @Override
+    public void registerSessionHandler(ISessionHandler handler, SessionHandlerOptions handlerOptions, String sessionId, ExecutorService executorService) throws InterruptedException, ServiceBusException {
     	assertNonNulls(handler, handlerOptions, executorService);
-    	TRACE_LOGGER.info("Registering session handler on entity '{}' with '{}'", this.entityPath, handlerOptions);
+    	TRACE_LOGGER.info("Registering session handler on entity '{}' with '{}' for session '{}'", this.entityPath, handlerOptions, sessionId);
         this.setHandlerRegistered();
         this.sessionHandler = handler;
         this.sessionHandlerOptions = handlerOptions;
         this.customCodeExecutor = executorService;
 
         for (int i = 0; i < handlerOptions.getMaxConcurrentSessions(); i++) {
-            this.acceptSessionAndPumpMessages();
+            this.acceptSessionAndPumpMessages(sessionId);
         }
     }
-    
+
     private static void assertNonNulls(Object handler, Object options, ExecutorService executorService)
     {
     	if(handler == null || options == null || executorService == null)
@@ -183,7 +205,7 @@ class MessageAndSessionPump extends InitializableEntity implements IMessageAndSe
                             onMessageFuture = new CompletableFuture<Void>();
                             onMessageFuture.completeExceptionally(onMessageSyncEx);
                         }
-                        
+
                         // Some clients are returning null from the call
                         if(onMessageFuture == null)
                         {
@@ -250,10 +272,10 @@ class MessageAndSessionPump extends InitializableEntity implements IMessageAndSe
         }
     }
 
-    private void acceptSessionAndPumpMessages() {
+    private void acceptSessionAndPumpMessages(String sessionId) {
         if (!this.getIsClosingOrClosed()) {
             TRACE_LOGGER.debug("Accepting a session from entity '{}'", this.entityPath);
-            CompletableFuture<IMessageSession> acceptSessionFuture = ClientFactory.acceptSessionFromEntityPathAsync(this.factory, this.entityPath, this.entityType, null, this.receiveMode);
+            CompletableFuture<IMessageSession> acceptSessionFuture = ClientFactory.acceptSessionFromEntityPathAsync(this.factory, this.entityPath, this.entityType, sessionId, this.receiveMode);
             acceptSessionFuture.handleAsync((session, acceptSessionEx) -> {
                 if (acceptSessionEx != null) {
                     acceptSessionEx = ExceptionUtil.extractAsyncCompletionCause(acceptSessionEx);
@@ -269,7 +291,7 @@ class MessageAndSessionPump extends InitializableEntity implements IMessageAndSe
                         // In case of any other exception, sleep and retry
                         TRACE_LOGGER.debug("AcceptSession from entity '{}' will be retried after '{}'.", this.entityPath, SLEEP_DURATION_ON_ACCEPT_SESSION_EXCEPTION);
                         Timer.schedule(() -> {
-                            MessageAndSessionPump.this.acceptSessionAndPumpMessages();
+                            MessageAndSessionPump.this.acceptSessionAndPumpMessages(sessionId);
                         }, SLEEP_DURATION_ON_ACCEPT_SESSION_EXCEPTION, TimerType.OneTimeRun);
                     }
                 } else {
@@ -345,7 +367,7 @@ class MessageAndSessionPump extends InitializableEntity implements IMessageAndSe
                         {
                             onMessageFuture = COMPLETED_FUTURE;
                         }
-                        
+
                         onMessageFuture.handleAsync((v, onMessageEx) -> {
                             renewCancelTimer.cancel(true);
                             if (onMessageEx != null) {
@@ -472,7 +494,7 @@ class MessageAndSessionPump extends InitializableEntity implements IMessageAndSe
                     onCloseFuture = new CompletableFuture<Void>();
                     onCloseFuture.completeExceptionally(onCloseSyncEx);
                 }
-                
+
                 // Some clients are returning null from the call
                 if(onCloseFuture == null)
                 {
@@ -500,7 +522,7 @@ class MessageAndSessionPump extends InitializableEntity implements IMessageAndSe
                         }
 
                         this.messageAndSessionPump.openSessions.remove(this.session.getSessionId());
-                        this.messageAndSessionPump.acceptSessionAndPumpMessages();
+                        this.messageAndSessionPump.acceptSessionAndPumpMessages(this.session.getSessionId());
                         return null;
                     }, MessagingFactory.INTERNAL_THREAD_POOL);
                     return null;
@@ -781,7 +803,7 @@ class MessageAndSessionPump extends InitializableEntity implements IMessageAndSe
 
     private void notifyExceptionToMessageHandler(Throwable ex, ExceptionPhase phase) {
         if (!(ex instanceof IllegalStateException && this.getIsClosingOrClosed())) {
-        	this.customCodeExecutor.execute(() -> {this.messageHandler.notifyException(ex, phase);});            
+        	this.customCodeExecutor.execute(() -> {this.messageHandler.notifyException(ex, phase);});
         }
     }
 
@@ -796,7 +818,7 @@ class MessageAndSessionPump extends InitializableEntity implements IMessageAndSe
         {
             throw new IllegalArgumentException("Prefetch count cannot be negative.");
         }
-        
+
         this.prefetchCount = prefetchCount;
         if(this.innerReceiver != null)
         {

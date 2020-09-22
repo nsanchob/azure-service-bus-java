@@ -32,7 +32,7 @@ public final class QueueClient extends InitializableEntity implements IQueueClie
     private MessagingFactory factory;
     private IMessageSender sender;
     private CompletableFuture<Void> senderCreationFuture;
-    
+
     private MessageAndSessionPump messageAndSessionPump;
     private SessionBrowser sessionBrowser;
     private MiscRequestResponseOperationHandler miscRequestResponseHandler;
@@ -43,7 +43,7 @@ public final class QueueClient extends InitializableEntity implements IQueueClie
         this.queuePath = queuePath;
         this.senderCreationLock = new Object();
     }
-    
+
     public QueueClient(ConnectionStringBuilder amqpConnectionStringBuilder, ReceiveMode receiveMode) throws InterruptedException, ServiceBusException {
         this(receiveMode, amqpConnectionStringBuilder.getEntityPath());
         CompletableFuture<MessagingFactory> factoryFuture = MessagingFactory.createFromConnectionStringBuilderAsync(amqpConnectionStringBuilder);
@@ -52,12 +52,12 @@ public final class QueueClient extends InitializableEntity implements IQueueClie
             TRACE_LOGGER.info("Created queue client to connection string '{}'", amqpConnectionStringBuilder.toLoggableString());
         }
     }
-    
+
     public QueueClient(String namespace, String queuePath, ClientSettings clientSettings, ReceiveMode receiveMode) throws InterruptedException, ServiceBusException
     {
         this(Util.convertNamespaceToEndPointURI(namespace), queuePath, clientSettings, receiveMode);
     }
-    
+
     public QueueClient(URI namespaceEndpointURI, String queuePath, ClientSettings clientSettings, ReceiveMode receiveMode) throws InterruptedException, ServiceBusException
     {
         this(receiveMode, queuePath);
@@ -89,7 +89,7 @@ public final class QueueClient extends InitializableEntity implements IQueueClie
 
         return CompletableFuture.allOf(postSessionBrowserFuture, messagePumpInitFuture);
     }
-    
+
     private CompletableFuture<Void> createSenderAsync()
     {
         synchronized (this.senderCreationLock) {
@@ -116,11 +116,11 @@ public final class QueueClient extends InitializableEntity implements IQueueClie
                     return null;
                 }, MessagingFactory.INTERNAL_THREAD_POOL);
             }
-            
+
             return this.senderCreationFuture;
         }
     }
-    
+
     private CompletableFuture<Void> closeSenderAsync()
     {
         synchronized (this.senderCreationLock)
@@ -157,7 +157,7 @@ public final class QueueClient extends InitializableEntity implements IQueueClie
 
     @Override
     public CompletableFuture<Void> sendAsync(IMessage message) {
-        return this.createSenderAsync().thenComposeAsync((v) -> 
+        return this.createSenderAsync().thenComposeAsync((v) ->
         {
             return this.sender.sendAsync(message);
         }, MessagingFactory.INTERNAL_THREAD_POOL);
@@ -165,7 +165,7 @@ public final class QueueClient extends InitializableEntity implements IQueueClie
 
     @Override
     public CompletableFuture<Void> sendBatchAsync(Collection<? extends IMessage> messages) {
-        return this.createSenderAsync().thenComposeAsync((v) -> 
+        return this.createSenderAsync().thenComposeAsync((v) ->
         {
             return this.sender.sendBatchAsync(messages);
         }, MessagingFactory.INTERNAL_THREAD_POOL);
@@ -173,7 +173,7 @@ public final class QueueClient extends InitializableEntity implements IQueueClie
 
     @Override
     public CompletableFuture<Long> scheduleMessageAsync(IMessage message, Instant scheduledEnqueueTimeUtc) {
-        return this.createSenderAsync().thenComposeAsync((v) -> 
+        return this.createSenderAsync().thenComposeAsync((v) ->
         {
             return this.sender.scheduleMessageAsync(message, scheduledEnqueueTimeUtc);
         }, MessagingFactory.INTERNAL_THREAD_POOL);
@@ -181,7 +181,7 @@ public final class QueueClient extends InitializableEntity implements IQueueClie
 
     @Override
     public CompletableFuture<Void> cancelScheduledMessageAsync(long sequenceNumber) {
-        return this.createSenderAsync().thenComposeAsync((v) -> 
+        return this.createSenderAsync().thenComposeAsync((v) ->
         {
             return this.sender.cancelScheduledMessageAsync(sequenceNumber);
         }, MessagingFactory.INTERNAL_THREAD_POOL);
@@ -222,10 +222,22 @@ public final class QueueClient extends InitializableEntity implements IQueueClie
 
     @Deprecated
     @Override
+    public void registerSessionHandler(ISessionHandler handler, String sessionId) throws InterruptedException, ServiceBusException {
+        this.messageAndSessionPump.registerSessionHandler(handler, sessionId);
+    }
+
+    @Deprecated
+    @Override
     public void registerSessionHandler(ISessionHandler handler, SessionHandlerOptions handlerOptions) throws InterruptedException, ServiceBusException {
         this.messageAndSessionPump.registerSessionHandler(handler, handlerOptions);
     }
-    
+
+    @Deprecated
+    @Override
+    public void registerSessionHandler(ISessionHandler handler, SessionHandlerOptions handlerOptions, String sessionId) throws InterruptedException, ServiceBusException {
+        this.messageAndSessionPump.registerSessionHandler(handler, handlerOptions, sessionId);
+    }
+
     @Override
     public void registerMessageHandler(IMessageHandler handler, ExecutorService executorService) throws InterruptedException, ServiceBusException {
         this.messageAndSessionPump.registerMessageHandler(handler, executorService);
@@ -242,8 +254,18 @@ public final class QueueClient extends InitializableEntity implements IQueueClie
     }
 
     @Override
+    public void registerSessionHandler(ISessionHandler handler, String sessionId, ExecutorService executorService) throws InterruptedException, ServiceBusException {
+        this.messageAndSessionPump.registerSessionHandler(handler, sessionId, executorService);
+    }
+
+    @Override
     public void registerSessionHandler(ISessionHandler handler, SessionHandlerOptions handlerOptions, ExecutorService executorService) throws InterruptedException, ServiceBusException {
         this.messageAndSessionPump.registerSessionHandler(handler, handlerOptions, executorService);
+    }
+
+    @Override
+    public void registerSessionHandler(ISessionHandler handler, SessionHandlerOptions handlerOptions, String sessionId, ExecutorService executorService) throws InterruptedException, ServiceBusException {
+        this.messageAndSessionPump.registerSessionHandler(handler, handlerOptions, sessionId, executorService);
     }
 
     // No op now
